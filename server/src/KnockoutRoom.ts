@@ -671,7 +671,7 @@ export class KnockoutRoom extends Room {
 
   private chooseParticipationAwardWinner(): void {
     const eligible = Array.from(this.players.values()).filter(
-      (p) => !p.isBot && !p.spectator,
+      (p) => p.connected && !p.isBot && !p.spectator,
     );
 
     if (eligible.length === 0) {

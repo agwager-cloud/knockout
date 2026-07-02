@@ -1,16 +1,11 @@
-# Knockout Hot Fix 16
+Knockout hot fix 17
 
-This hot fix rebuilds the itch.io client package with a more robust browser boot setup.
+Issue fixed:
+- Participation Award could select a player who had already left/disconnected before the game ended.
 
-Fixes / safeguards:
+Change made:
+- The server now only includes players who are still connected at the end of the match in the Participation Award draw.
+- Bots are still excluded.
+- Spectators are still excluded.
 
-- Uses stable itch.io-friendly client filenames: `assets/index.js` and `assets/style.css`.
-- Keeps relative asset paths for itch.io nested iframe hosting.
-- Adds a visible boot message while the Phaser bundle loads.
-- Adds a visible error message if the browser fails before the StartScene can appear, so future issues are not silent.
-- Rebuilt the itch.io upload zip from the latest Hot Fix 15 source.
-
-Important:
-
-- Upload the itch zip, not the source hot fix zip, to itch.io.
-- The source hot fix zip is for `C:\Projects\Knockout` only.
+Apply this over your project folder, then commit and push so Render redeploys.
