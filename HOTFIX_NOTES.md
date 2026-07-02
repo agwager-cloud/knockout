@@ -1,17 +1,18 @@
-# Knockout Render Hot Fix 12
-
-Adds spectator cheering and a participation award sequence.
+# Knockout Hot Fix 13 — Participation Award Overlay Timing
 
 ## Changes
-- Eliminated players now see: "Stick around until the end and cheer for your favourite player."
-- After round 5, eliminated human players can tap/click small penguin icons below the table to cheer for remaining players.
-- Added a total cheers counter on the GameScene.
-- Server tracks cheer counts per player and includes them in the game state.
-- ResultsScene now shows each player’s cheer count in a small circle beside their name, with the champion cheer count shown on the champion banner.
-- Server chooses a random participation award winner from real human participants only; bots are excluded.
-- ResultsScene automatically performs a 3–5 second participation award draw before host controls unlock.
-- Play Again and Return to Lobby are disabled during the participation award draw.
-- Added a confetti celebration when the participation award winner is announced.
 
-## Build test
+- ResultsScene participation award now always performs a suspense draw for roughly 4 seconds before revealing the winner.
+- Single-human-player games now still show an animated draw sequence instead of instantly revealing the award winner.
+- After the winner is revealed, the award pop-up and confetti stay visible for 3 seconds.
+- The award overlay then hides automatically so the elimination order and cheer stats underneath are visible.
+- Host controls remain locked while the draw is running and while the winner pop-up is visible.
+- PLAY AGAIN and RETURN TO LOBBY unlock after the pop-up closes.
+
+## Files changed
+
+- client/src/scenes/ResultsScene.ts
+
+## Testing
+
 - `npm run build` passes for both client and server.
