@@ -267,7 +267,9 @@ export class ResultsScene extends Phaser.Scene {
       color: "#07314d",
     }).setOrigin(0.5);
 
-    const entries = [...this.state.eliminationOrder].reverse();
+    const entries = [...this.state.eliminationOrder]
+      .filter((entry) => entry.id !== this.state?.championId)
+      .reverse();
     if (entries.length === 0) {
       this.addText(190, 300, "No penguins were eliminated.", {
         fontFamily: "Arial",
@@ -276,22 +278,31 @@ export class ResultsScene extends Phaser.Scene {
         fontStyle: "bold",
       });
     } else {
-      const startY = 294;
-      const maxRows =
-        entries.length > 20 ? Math.ceil(entries.length / 2) : entries.length;
-      const lineH = maxRows > 13 ? 20 : 28;
-      const fontSize = maxRows > 13 ? 17 : 21;
+      const startY = 292;
+      const columns = entries.length <= 10 ? 1 : entries.length <= 20 ? 2 : 3;
+      const rowsPerColumn = Math.ceil(entries.length / columns);
+      const lineH = rowsPerColumn > 12 ? 20 : rowsPerColumn > 10 ? 22 : 28;
+      const fontSize = columns === 3 ? 16 : rowsPerColumn > 10 ? 18 : 21;
+      const columnXs =
+        columns === 1 ? [190] : columns === 2 ? [190, 680] : [150, 500, 850];
+      const badgeOffset = columns === 3 ? 295 : 420;
+
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
-        const col = i < maxRows ? 0 : 1;
-        const row = col === 0 ? i : i - maxRows;
-        const x = col === 0 ? 190 : 680;
+        const col = Math.floor(i / rowsPerColumn);
+        const row = i % rowsPerColumn;
+        const x = columnXs[col] ?? columnXs[columnXs.length - 1];
         const y = startY + row * lineH;
         const originalOrder = entries.length - i;
+        const maxNameLength = columns === 3 ? 9 : 13;
+        const shortName =
+          entry.name.length > maxNameLength
+            ? `${entry.name.slice(0, maxNameLength - 1)}…`
+            : entry.name;
         const line = this.addText(
           x,
           y,
-          `${originalOrder}. ${entry.name} — round ${entry.round}`,
+          `${originalOrder}. ${shortName} — r${entry.round}`,
           {
             fontFamily: "Arial",
             fontSize: `${fontSize}px`,
@@ -299,7 +310,7 @@ export class ResultsScene extends Phaser.Scene {
             fontStyle: "bold",
           },
         );
-        const badgeX = Math.min(x + 420, x + line.displayWidth + 22);
+        const badgeX = Math.min(x + badgeOffset, x + line.displayWidth + 21);
         this.drawCheerBadge(
           g,
           badgeX,

@@ -528,7 +528,7 @@ export class GameScene extends Phaser.Scene {
       } else if (amEliminatedParticipant) {
         this.helpText.setText(
           this.state.round > 5
-            ? 'Click or tap a penguin below to cheer for your favourite player!'
+            ? 'Click or tap a penguin above to cheer for your favourite player!'
             : 'Stick around until the end and cheer for your favourite player.'
         );
       } else {
@@ -547,7 +547,7 @@ export class GameScene extends Phaser.Scene {
           ? 'You are spectating this match and will join the next game.'
           : amEliminatedParticipant
             ? this.state.round > 5
-              ? 'Click or tap a penguin below to cheer for your favourite player!'
+              ? 'Click or tap a penguin above to cheer for your favourite player!'
               : 'Stick around until the end and cheer for your favourite player.'
           : holes > 0
             ? `Penguins are sliding. Extra ice holes are active from round 11 onwards.`

@@ -1,13 +1,10 @@
-# Knockout hot fix 14
+# Knockout Hot Fix 15
 
-## Changes
+Fixes:
 
-- Moved the eliminated-player cheer overlay lower so it sits more neatly between the pool table and the bottom instruction text.
-- Added a clear label above the cheer icons: `Tap a penguin to cheer!`
-- Updated the eliminated-player instruction after round 5 to: `Click or tap a penguin below to cheer for your favourite player!`
-- Keeps the original eliminated-player message before cheering unlocks.
+- ResultsScene elimination order now splits into extra columns once there are more than 10 eliminated players, so names no longer fall off the bottom of the panel.
+- ResultsScene also filters the champion out of the elimination list as an extra client-side safety check.
+- Server champion logic now handles rare all-penguins-pocketed-at-once endings by crowning the last processed penguin and removing them from the elimination list, so the champion cannot also appear as eliminated.
+- Updated eliminated-player cheer instruction after Round 5 to say the cheer penguins are above the instruction text.
 
-## Testing
-
-- `npm run build` passes for the client and server.
-- The updated itch.io client build keeps the existing Render server URL and itch-safe asset/audio paths.
+Build checked with `npm run build`.

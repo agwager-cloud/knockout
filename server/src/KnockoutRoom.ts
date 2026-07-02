@@ -575,6 +575,21 @@ export class KnockoutRoom extends Room {
         connectedPlayers.find((p) => p.id === lastEliminated?.id) ??
         connectedPlayers[0] ??
         null;
+
+      if (champion) {
+        // If the final physics tick pockets everyone at once, the fairest
+        // fallback is to crown the last penguin processed as the champion.
+        // Remove that player from the elimination list so the results screen
+        // never shows the champion as also being eliminated.
+        this.eliminationOrder = this.eliminationOrder.filter(
+          (entry) => entry.id !== champion.id,
+        );
+        champion.alive = true;
+        champion.eliminatedRound = null;
+        champion.vx = 0;
+        champion.vy = 0;
+      }
+
       this.championId = champion?.id ?? null;
       this.championName = champion?.name ?? null;
       this.chooseParticipationAwardWinner();
