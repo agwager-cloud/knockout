@@ -1,10 +1,16 @@
-# Knockout Hot Fix 15
+# Knockout Hot Fix 16
 
-Fixes:
+This hot fix rebuilds the itch.io client package with a more robust browser boot setup.
 
-- ResultsScene elimination order now splits into extra columns once there are more than 10 eliminated players, so names no longer fall off the bottom of the panel.
-- ResultsScene also filters the champion out of the elimination list as an extra client-side safety check.
-- Server champion logic now handles rare all-penguins-pocketed-at-once endings by crowning the last processed penguin and removing them from the elimination list, so the champion cannot also appear as eliminated.
-- Updated eliminated-player cheer instruction after Round 5 to say the cheer penguins are above the instruction text.
+Fixes / safeguards:
 
-Build checked with `npm run build`.
+- Uses stable itch.io-friendly client filenames: `assets/index.js` and `assets/style.css`.
+- Keeps relative asset paths for itch.io nested iframe hosting.
+- Adds a visible boot message while the Phaser bundle loads.
+- Adds a visible error message if the browser fails before the StartScene can appear, so future issues are not silent.
+- Rebuilt the itch.io upload zip from the latest Hot Fix 15 source.
+
+Important:
+
+- Upload the itch zip, not the source hot fix zip, to itch.io.
+- The source hot fix zip is for `C:\Projects\Knockout` only.

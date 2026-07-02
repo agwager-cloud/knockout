@@ -4,8 +4,41 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Knockout</title>
+    <style>
+      #bootMessage {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #061a2b;
+        color: #d8f6ff;
+        font: 800 22px Arial, sans-serif;
+        text-align: center;
+        padding: 24px;
+        z-index: 9999;
+      }
+      #bootMessage .small {
+        display: block;
+        margin-top: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        opacity: .8;
+      }
+    </style>
+    <script>
+      window.addEventListener('error', function (event) {
+        var el = document.getElementById('bootMessage');
+        if (el) el.innerHTML = 'Knockout could not start.<span class="small">' + String(event.message || 'Unknown error') + '</span>';
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        var el = document.getElementById('bootMessage');
+        var reason = event.reason && (event.reason.message || event.reason.toString && event.reason.toString()) || 'Unknown promise error';
+        if (el) el.innerHTML = 'Knockout could not start.<span class="small">' + String(reason) + '</span>';
+      });
+    </script>
   </head>
   <body>
+    <div id="bootMessage">Loading Knockout...<span class="small">If this stays here, refresh the page once.</span></div>
     <div id="game"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

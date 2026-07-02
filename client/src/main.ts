@@ -24,4 +24,11 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [StartScene, LobbyScene, GameScene, ResultsScene]
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+window.setTimeout(() => {
+  const bootMessage = document.getElementById('bootMessage');
+  bootMessage?.remove();
+}, 500);
+
+export default game;
