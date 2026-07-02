@@ -1,0 +1,158 @@
+html,
+body,
+#game {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #061a2b;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+canvas {
+  display: block;
+}
+
+.knockout-panel {
+  width: min(500px, 84vw);
+  box-sizing: border-box;
+  padding: 24px;
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+  border: 4px solid rgba(124, 209, 255, 0.9);
+  color: #123047;
+  text-align: center;
+}
+
+.knockout-panel.start-panel {
+  width: min(360px, 72vw);
+  padding: 13px 16px 12px;
+  border-radius: 20px;
+  background: rgba(239, 251, 255, 0.88);
+  border: 3px solid rgba(162, 232, 255, 0.96);
+  box-shadow: 0 14px 46px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(2px);
+}
+
+.knockout-panel .form-title {
+  margin: 0 0 7px;
+  font-size: 17px;
+  font-weight: 900;
+  color: #07314d;
+}
+
+.knockout-panel .server-line {
+  font-size: 10px;
+  opacity: .62;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.knockout-panel h1 {
+  margin: 0 0 8px;
+  font-size: clamp(42px, 8vw, 70px);
+  line-height: 0.95;
+  letter-spacing: 1px;
+  color: #0b4d78;
+  text-shadow: 0 3px 0 #bdefff;
+}
+
+.knockout-panel .subtitle {
+  margin: 0 0 18px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.knockout-panel input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 3px solid #8fd8ff;
+  font-size: 18px;
+  outline: none;
+  text-align: center;
+  color: #123047;
+}
+
+.knockout-panel input:focus {
+  border-color: #f6ba41;
+}
+
+.knockout-panel button {
+  width: 100%;
+  margin: 8px 0;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 16px;
+  font-size: 18px;
+  font-weight: 800;
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.22);
+}
+
+.knockout-panel button:active {
+  transform: translateY(2px);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.22);
+}
+
+.knockout-panel .host {
+  background: linear-gradient(180deg, #1aa7e1, #0b73ad);
+}
+
+.knockout-panel .join {
+  background: linear-gradient(180deg, #f0aa31, #d36c18);
+}
+
+.knockout-panel .error {
+  min-height: 18px;
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #b42828;
+}
+
+@media (max-height: 520px) {
+  .knockout-panel {
+    padding: 14px;
+  }
+
+  .knockout-panel h1 {
+    font-size: 40px;
+  }
+
+  .knockout-panel input,
+  .knockout-panel button {
+    padding: 10px 12px;
+    margin: 5px 0;
+    font-size: 15px;
+  }
+}
+
+
+.knockout-panel.start-panel input {
+  margin: 5px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border-width: 2px;
+  font-size: 16px;
+}
+
+.knockout-panel.start-panel button {
+  margin: 5px 0;
+  padding: 10px 14px;
+  border-radius: 13px;
+  font-size: 16px;
+}
+
+.knockout-panel.start-panel .error {
+  min-height: 15px;
+  margin-top: 4px;
+  font-size: 12px;
+}
