@@ -148,6 +148,8 @@ export class KnockoutRoom extends Room {
   private extraPockets: PocketSnapshot[] = [];
   private championId: string | null = null;
   private championName: string | null = null;
+  private participationAwardWinnerId: string | null = null;
+  private participationAwardWinnerName: string | null = null;
   private countdownMs = COUNTDOWN_MS;
   private round = 0;
   private lastTickTime = Date.now();
@@ -156,6 +158,7 @@ export class KnockoutRoom extends Room {
   private botCounter = 0;
   private botsEnabled = false;
   private deviceIds = new Map<string, string>();
+  private cheerThrottle = new Map<string, number>();
 
   onAuth(client: Client, options: { deviceId?: unknown }): boolean {
     const deviceId = cleanDeviceId(options.deviceId);
@@ -232,6 +235,10 @@ export class KnockoutRoom extends Room {
       this.aimCommands.set(client.sessionId, { angle, power });
     });
 
+    this.onMessage("cheer", (client, data: { targetId?: unknown }) => {
+      this.handleCheer(client.sessionId, data?.targetId);
+    });
+
     this.clock.setInterval(() => this.tick(), TICK_RATE_MS);
     this.clock.setInterval(() => this.broadcastSnapshot(), 100);
   }
@@ -253,6 +260,7 @@ export class KnockoutRoom extends Room {
       eliminatedRound: null,
       isBot: false,
       spectator: joinedDuringActiveGame,
+      cheerCount: 0,
     };
 
     this.players.set(client.sessionId, player);
@@ -333,7 +341,10 @@ export class KnockoutRoom extends Room {
     this.extraPockets = [];
     this.championId = null;
     this.championName = null;
+    this.participationAwardWinnerId = null;
+    this.participationAwardWinnerName = null;
     this.aimCommands.clear();
+    this.cheerThrottle.clear();
     this.message = "Game started.";
 
     const activePlayers = Array.from(this.players.values()).filter(
@@ -343,6 +354,7 @@ export class KnockoutRoom extends Room {
       p.spectator = false;
       p.alive = true;
       p.eliminatedRound = null;
+      p.cheerCount = 0;
       p.vx = 0;
       p.vy = 0;
     }
@@ -359,7 +371,10 @@ export class KnockoutRoom extends Room {
     this.extraPockets = [];
     this.championId = null;
     this.championName = null;
+    this.participationAwardWinnerId = null;
+    this.participationAwardWinnerName = null;
     this.aimCommands.clear();
+    this.cheerThrottle.clear();
     this.message = "Back in the lobby.";
 
     for (const p of Array.from(this.players.values())) {
@@ -370,6 +385,7 @@ export class KnockoutRoom extends Room {
       p.spectator = false;
       p.alive = true;
       p.eliminatedRound = null;
+      p.cheerCount = 0;
       p.vx = 0;
       p.vy = 0;
     }
@@ -519,6 +535,26 @@ export class KnockoutRoom extends Room {
         : `${player.name} disconnected and is out.`;
   }
 
+  private handleCheer(sourceId: string, targetIdValue: unknown): void {
+    if (this.round <= 5) return;
+    if (this.phase !== "aiming" && this.phase !== "rolling") return;
+
+    const source = this.players.get(sourceId);
+    if (!source || source.isBot || source.spectator || source.alive) return;
+
+    const targetId = typeof targetIdValue === "string" ? targetIdValue : "";
+    const target = this.players.get(targetId);
+    if (!target || !target.connected || target.spectator || !target.alive) return;
+
+    const now = Date.now();
+    const lastCheer = this.cheerThrottle.get(sourceId) ?? 0;
+    if (now - lastCheer < 80) return;
+
+    this.cheerThrottle.set(sourceId, now);
+    target.cheerCount += 1;
+    this.broadcastSnapshot();
+  }
+
   private checkForChampion(): void {
     if (this.phase === "finished" || this.phase === "lobby") return;
     const alive = this.getAlivePlayers();
@@ -541,6 +577,7 @@ export class KnockoutRoom extends Room {
         null;
       this.championId = champion?.id ?? null;
       this.championName = champion?.name ?? null;
+      this.chooseParticipationAwardWinner();
       this.phase = "finished";
       this.countdownMs = 0;
       this.message = champion
@@ -611,9 +648,26 @@ export class KnockoutRoom extends Room {
         eliminatedRound: null,
         isBot: true,
         spectator: false,
+        cheerCount: 0,
       };
       this.players.set(id, bot);
     }
+  }
+
+  private chooseParticipationAwardWinner(): void {
+    const eligible = Array.from(this.players.values()).filter(
+      (p) => !p.isBot && !p.spectator,
+    );
+
+    if (eligible.length === 0) {
+      this.participationAwardWinnerId = null;
+      this.participationAwardWinnerName = null;
+      return;
+    }
+
+    const winner = eligible[Math.floor(Math.random() * eligible.length)];
+    this.participationAwardWinnerId = winner.id;
+    this.participationAwardWinnerName = winner.name;
   }
 
   private removeTestBots(): void {
@@ -773,6 +827,11 @@ export class KnockoutRoom extends Room {
   }
 
   private buildSnapshot(): GameSnapshot {
+    const totalCheers = Array.from(this.players.values()).reduce(
+      (sum, player) => sum + (player.cheerCount ?? 0),
+      0,
+    );
+
     return {
       roomCode: this.roomCode,
       phase: this.phase,
@@ -782,6 +841,9 @@ export class KnockoutRoom extends Room {
       championId: this.championId,
       championName: this.championName,
       botsEnabled: this.botsEnabled,
+      totalCheers,
+      participationAwardWinnerId: this.participationAwardWinnerId,
+      participationAwardWinnerName: this.participationAwardWinnerName,
       countdownMs: Math.max(0, Math.round(this.countdownMs)),
       round: this.round,
       table: {

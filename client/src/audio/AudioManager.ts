@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
 
 const MUSIC_KEY = 'knockout-background-music';
-const MUSIC_URL = '/assets/audio/background.mp3';
+const MUSIC_URL = 'assets/audio/background.mp3';
 const KNOCKOUT_KEY = 'knockout-own-ko';
-const KNOCKOUT_URL = '/assets/audio/knockout.mp3';
+const KNOCKOUT_URL = 'assets/audio/knockout.mp3';
 const OPPONENT_KO_KEY = 'knockout-opponent-ko';
-const OPPONENT_KO_URL = '/assets/audio/opponentko.mp3';
+const OPPONENT_KO_URL = 'assets/audio/opponentko.mp3';
 const STORAGE_KEY = 'knockout-music-muted';
 
 let music: Phaser.Sound.BaseSound | null = null;

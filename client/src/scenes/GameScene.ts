@@ -6,7 +6,7 @@ import {
   playOpponentKnockoutSound,
   preloadBackgroundMusic
 } from '../audio/AudioManager';
-import { getLatestState, getMyId, sendAim, watchState } from '../net/Net';
+import { getLatestState, getMyId, sendAim, sendCheer, watchState } from '../net/Net';
 import {
   clamp,
   formatCountdown,
@@ -44,8 +44,10 @@ export class GameScene extends Phaser.Scene {
   private phaseText!: Phaser.GameObjects.Text;
   private timerText!: Phaser.GameObjects.Text;
   private aliveText!: Phaser.GameObjects.Text;
+  private totalCheersText!: Phaser.GameObjects.Text;
   private helpText!: Phaser.GameObjects.Text;
   private powerText?: Phaser.GameObjects.Text;
+  private cheerButtons: Array<{ id: string; x: number; y: number; radius: number }> = [];
   private aimAngle = 0;
   private aimPower = 0;
   private dragging = false;
@@ -53,6 +55,7 @@ export class GameScene extends Phaser.Scene {
   private lastAimSend = 0;
   private seenEliminationIds = new Set<string>();
   private hasProcessedFirstSnapshot = false;
+  private lastCheerSentAt = 0;
 
   constructor() {
     super('GameScene');
@@ -112,6 +115,15 @@ export class GameScene extends Phaser.Scene {
       fontStyle: 'bold'
     }).setOrigin(1, 0);
 
+    this.totalCheersText = this.add.text(1002, 70, '', {
+      fontFamily: 'Arial',
+      fontSize: '18px',
+      color: '#dff7ff',
+      fontStyle: 'bold',
+      stroke: '#07314d',
+      strokeThickness: 3
+    }).setOrigin(1, 0.5);
+
     this.helpText = this.add.text(640, 688, '', {
       fontFamily: 'Arial',
       fontSize: '19px',
@@ -160,6 +172,8 @@ export class GameScene extends Phaser.Scene {
       this.aimVisible = false;
       this.seenEliminationIds.clear();
       this.hasProcessedFirstSnapshot = false;
+      this.cheerButtons = [];
+      this.lastCheerSentAt = 0;
     });
   }
 
@@ -171,6 +185,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handlePointer(pointer: Phaser.Input.Pointer): void {
+    if (pointer.isDown && this.tryHandleCheer(pointer)) return;
+
     if (!this.state || this.state.phase !== 'aiming') return;
     const me = this.getMe();
     if (!me || !me.alive) return;
@@ -189,6 +205,26 @@ export class GameScene extends Phaser.Scene {
 
     this.aimAngle = Math.atan2(dy, dx);
     this.aimPower = clamp(distance / 230, 0, 1);
+  }
+
+  private tryHandleCheer(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.state) return false;
+    const me = this.getMe();
+    if (!me || me.alive || me.spectator || this.state.round <= 5) return false;
+    if (this.state.phase !== 'aiming' && this.state.phase !== 'rolling') return false;
+
+    const hit = this.cheerButtons.find((button) => {
+      const dx = pointer.x - button.x;
+      const dy = pointer.y - button.y;
+      return dx * dx + dy * dy <= button.radius * button.radius;
+    });
+    if (!hit) return false;
+
+    const now = this.time.now;
+    if (now - this.lastCheerSentAt < 70) return true;
+    this.lastCheerSentAt = now;
+    sendCheer(hit.id);
+    return true;
   }
 
   private handlePointerUp(): void {
@@ -476,6 +512,9 @@ export class GameScene extends Phaser.Scene {
     const me = this.getMe();
     this.roomCodeText.setText(`Code: ${this.state.roomCode}`);
     this.aliveText.setText(`Alive: ${alive}/${participants.length}`);
+    this.totalCheersText.setText(`Cheers: ${this.state.totalCheers ?? 0}`);
+
+    const amEliminatedParticipant = !!me && !me.alive && !me.spectator;
 
     if (this.state.phase === 'aiming') {
       this.phaseText.setText(`ROUND ${this.state.round}`);
@@ -483,6 +522,8 @@ export class GameScene extends Phaser.Scene {
       const holes = this.state.extraPockets.length;
       if (me?.spectator) {
         this.helpText.setText('You are spectating this match and will join the next game.');
+      } else if (amEliminatedParticipant) {
+        this.helpText.setText('Stick around until the end and cheer for your favourite player.');
       } else {
         this.helpText.setText(
           holes > 0
@@ -497,6 +538,8 @@ export class GameScene extends Phaser.Scene {
       this.helpText.setText(
         me?.spectator
           ? 'You are spectating this match and will join the next game.'
+          : amEliminatedParticipant
+            ? 'Stick around until the end and cheer for your favourite player.'
           : holes > 0
             ? `Penguins are sliding. Extra ice holes are active from round 11 onwards.`
             : 'Penguins are sliding. Next 10 second shot starts when everything stops.'
@@ -523,6 +566,55 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.addOrUpdatePowerText('', 0, 0);
     }
+
+    this.drawCheerIcons(g, me);
+  }
+
+  private drawCheerIcons(g: Phaser.GameObjects.Graphics, me?: PlayerSnapshot): void {
+    this.cheerButtons = [];
+    if (!this.state || !me || me.alive || me.spectator || this.state.round <= 5) return;
+    if (this.state.phase !== 'aiming' && this.state.phase !== 'rolling') return;
+
+    const targets = this.state.players.filter((p) => p.alive && !p.spectator && p.connected);
+    if (targets.length === 0) return;
+
+    const rows = targets.length > 22 ? 2 : 1;
+    const perRow = Math.ceil(targets.length / rows);
+    const spacing = perRow <= 1 ? 0 : Math.min(46, (TABLE_W - 140) / (perRow - 1));
+    const startY = rows === 1 ? TABLE_Y + TABLE_H + 34 : TABLE_Y + TABLE_H + 23;
+
+    g.fillStyle(0x061a2b, 0.58);
+    g.fillRoundedRect(TABLE_X + 84, startY - 25, TABLE_W - 168, rows === 1 ? 54 : 86, 18);
+    g.lineStyle(2, 0x9de9ff, 0.38);
+    g.strokeRoundedRect(TABLE_X + 84, startY - 25, TABLE_W - 168, rows === 1 ? 54 : 86, 18);
+
+    targets.forEach((player, index) => {
+      const row = Math.floor(index / perRow);
+      const col = index % perRow;
+      const rowCount = row === rows - 1 ? targets.length - row * perRow : perRow;
+      const rowSpacing = rowCount <= 1 ? 0 : spacing;
+      const x = 640 - ((rowCount - 1) * rowSpacing) / 2 + col * rowSpacing;
+      const y = startY + row * 34;
+      this.cheerButtons.push({ id: player.id, x, y, radius: 20 });
+      this.drawMiniPenguin(g, x, y, player.color);
+    });
+  }
+
+  private drawMiniPenguin(g: Phaser.GameObjects.Graphics, x: number, y: number, color: string): void {
+    const tint = Number.parseInt(color.replace('#', '0x'));
+    g.fillStyle(0xffffff, 0.12);
+    g.fillCircle(x, y, 19);
+    g.lineStyle(2, 0xffffff, 0.6);
+    g.strokeCircle(x, y, 19);
+    g.fillStyle(tint, 1);
+    g.fillCircle(x, y, 12);
+    g.fillStyle(0xffffff, 0.96);
+    g.fillEllipse(x, y + 3, 13, 15);
+    g.fillStyle(0x111827, 1);
+    g.fillCircle(x - 4, y - 4, 1.8);
+    g.fillCircle(x + 4, y - 4, 1.8);
+    g.fillStyle(0xffb031, 1);
+    g.fillTriangle(x - 3, y, x + 3, y, x, y + 4);
   }
 
   private addOrUpdatePowerText(text: string, x: number, y: number): void {

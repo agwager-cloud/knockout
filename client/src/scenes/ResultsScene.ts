@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { addSoundToggle, ensureBackgroundMusic, preloadBackgroundMusic } from '../audio/AudioManager';
 import { getMyId, sendPlayAgain, sendReturnLobby, watchState } from '../net/Net';
-import type { GameSnapshot } from '../shared';
+import type { GameSnapshot, PlayerSnapshot } from '../shared';
 
 export class ResultsScene extends Phaser.Scene {
   private unsubscribe?: () => void;
@@ -12,6 +12,14 @@ export class ResultsScene extends Phaser.Scene {
   private lobbyButton!: Phaser.GameObjects.Text;
   private playAgainHitZone!: Phaser.GameObjects.Zone;
   private lobbyHitZone!: Phaser.GameObjects.Zone;
+  private awardObjects: Phaser.GameObjects.GameObject[] = [];
+  private awardTimers: Phaser.Time.TimerEvent[] = [];
+  private awardStarted = false;
+  private awardAnimating = false;
+  private awardComplete = false;
+  private awardNameText?: Phaser.GameObjects.Text;
+  private awardSubText?: Phaser.GameObjects.Text;
+  private awardHighlightRect?: Phaser.GameObjects.Rectangle;
 
   constructor() {
     super('ResultsScene');
@@ -27,6 +35,11 @@ export class ResultsScene extends Phaser.Scene {
     this.add.image(640, 360, 'other-bg').setDisplaySize(1280, 720).setDepth(-20);
     addSoundToggle(this);
     this.texts = [];
+    this.awardObjects = [];
+    this.awardTimers = [];
+    this.awardStarted = false;
+    this.awardAnimating = false;
+    this.awardComplete = false;
     this.unsubscribe = undefined;
     this.graphics = this.add.graphics();
 
@@ -46,7 +59,6 @@ export class ResultsScene extends Phaser.Scene {
       padding: { x: 24, y: 11 }
     }).setOrigin(0.5).setDepth(20);
 
-    // Large invisible hit zones make the buttons reliable on touch screens and desktop browsers.
     this.playAgainHitZone = this.add.zone(470, 668, 250, 68).setInteractive({ useHandCursor: true }).setDepth(30);
     this.lobbyHitZone = this.add.zone(790, 668, 335, 68).setInteractive({ useHandCursor: true }).setDepth(30);
 
@@ -64,6 +76,7 @@ export class ResultsScene extends Phaser.Scene {
         return;
       }
       this.renderResults();
+      this.ensureAwardAnimation();
     });
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -72,19 +85,22 @@ export class ResultsScene extends Phaser.Scene {
       this.playAgainHitZone.off('pointerdown', this.handlePlayAgain, this);
       this.lobbyHitZone.off('pointerdown', this.handleReturnLobby, this);
       this.clearTexts();
+      this.clearAwardObjects();
     });
   }
 
   private handlePlayAgain(): void {
-    if (!this.isHost() || !this.state?.championId) return;
+    if (!this.controlsUnlocked() || !this.state?.championId) return;
     this.playAgainButton.setText('STARTING...');
     this.playAgainHitZone.disableInteractive();
+    this.lobbyHitZone.disableInteractive();
     sendPlayAgain();
   }
 
   private handleReturnLobby(): void {
-    if (!this.isHost()) return;
+    if (!this.controlsUnlocked()) return;
     this.lobbyButton.setText('RETURNING...');
+    this.playAgainHitZone.disableInteractive();
     this.lobbyHitZone.disableInteractive();
     sendReturnLobby();
   }
@@ -94,6 +110,10 @@ export class ResultsScene extends Phaser.Scene {
     return !!this.state?.players.find((p) => p.id === myId && p.host && !p.isBot);
   }
 
+  private controlsUnlocked(): boolean {
+    return this.isHost() && this.awardComplete && !this.awardAnimating;
+  }
+
   private clearTexts(): void {
     for (const text of this.texts) {
       if (text.scene) text.destroy();
@@ -101,10 +121,36 @@ export class ResultsScene extends Phaser.Scene {
     this.texts = [];
   }
 
+  private clearAwardObjects(): void {
+    for (const timer of this.awardTimers) timer.remove(false);
+    this.awardTimers = [];
+    for (const object of this.awardObjects) object.destroy();
+    this.awardObjects = [];
+    this.awardNameText = undefined;
+    this.awardSubText = undefined;
+    this.awardHighlightRect = undefined;
+  }
+
   private addText(x: number, y: number, text: string, style: Phaser.Types.GameObjects.Text.TextStyle): Phaser.GameObjects.Text {
     const created = this.add.text(x, y, text, style).setDepth(10);
     this.texts.push(created);
     return created;
+  }
+
+  private getCheerCount(playerId: string): number {
+    return this.state?.players.find((p) => p.id === playerId)?.cheerCount ?? 0;
+  }
+
+  private drawCheerBadge(g: Phaser.GameObjects.Graphics, x: number, y: number, count: number): void {
+    g.fillStyle(0xfff4a3, 1);
+    g.fillCircle(x, y, 13);
+    g.lineStyle(3, 0x07314d, 0.75);
+    g.strokeCircle(x, y, 13);
+    this.addText(x, y - 8, String(count), {
+      fontFamily: 'Arial Black, Arial',
+      fontSize: count > 99 ? '9px' : '11px',
+      color: '#07314d'
+    }).setOrigin(0.5, 0);
   }
 
   private renderResults(): void {
@@ -154,11 +200,19 @@ export class ResultsScene extends Phaser.Scene {
       strokeThickness: 5
     }).setOrigin(0.5);
 
+    if (champion?.id) this.drawCheerBadge(g, 935, 181, this.getCheerCount(champion.id));
+
     this.addText(190, 246, 'Elimination order', {
       fontFamily: 'Arial Black, Arial',
       fontSize: '27px',
       color: '#07314d'
     });
+
+    this.addText(910, 252, `Total cheers: ${this.state.totalCheers ?? 0}`, {
+      fontFamily: 'Arial Black, Arial',
+      fontSize: '20px',
+      color: '#07314d'
+    }).setOrigin(0.5);
 
     const entries = [...this.state.eliminationOrder].reverse();
     if (entries.length === 0) {
@@ -180,32 +234,177 @@ export class ResultsScene extends Phaser.Scene {
         const x = col === 0 ? 190 : 680;
         const y = startY + row * lineH;
         const originalOrder = entries.length - i;
-        this.addText(x, y, `${originalOrder}. ${entry.name} — round ${entry.round}`, {
+        const line = this.addText(x, y, `${originalOrder}. ${entry.name} — round ${entry.round}`, {
           fontFamily: 'Arial',
           fontSize: `${fontSize}px`,
           color: '#123047',
           fontStyle: 'bold'
         });
+        const badgeX = Math.min(x + 420, x + line.displayWidth + 22);
+        this.drawCheerBadge(g, badgeX, y + fontSize / 2, this.getCheerCount(entry.id));
       }
     }
 
     const host = this.isHost();
-    const playAgainEnabled = host && !!this.state.championId;
-    this.playAgainButton.setAlpha(playAgainEnabled ? 1 : 0.45);
-    this.playAgainButton.setText(playAgainEnabled ? 'PLAY AGAIN' : host ? 'WAITING...' : 'HOST ONLY');
+    const unlocked = this.controlsUnlocked();
+    const playAgainEnabled = unlocked && !!this.state.championId;
+    this.playAgainButton.setAlpha(playAgainEnabled ? 1 : 0.42);
+    this.playAgainButton.setText(playAgainEnabled ? 'PLAY AGAIN' : host ? 'LOCKED' : 'HOST ONLY');
     if (playAgainEnabled) this.playAgainHitZone.setInteractive({ useHandCursor: true });
     else this.playAgainHitZone.disableInteractive();
 
-    this.lobbyButton.setAlpha(host ? 1 : 0.45);
-    this.lobbyButton.setText(host ? 'RETURN TO LOBBY' : 'HOST ONLY');
-    if (host) this.lobbyHitZone.setInteractive({ useHandCursor: true });
+    this.lobbyButton.setAlpha(unlocked ? 1 : 0.42);
+    this.lobbyButton.setText(unlocked ? 'RETURN TO LOBBY' : host ? 'LOCKED' : 'HOST ONLY');
+    if (unlocked) this.lobbyHitZone.setInteractive({ useHandCursor: true });
     else this.lobbyHitZone.disableInteractive();
 
-    this.addText(640, 613, host ? 'Host can replay immediately or return everyone to the lobby.' : 'Waiting for the host to start the next game.', {
+    const instruction = this.awardAnimating
+      ? 'Drawing the participation award. Host buttons unlock after the winner is announced.'
+      : this.awardComplete
+        ? host
+          ? 'Host can replay or return everyone to the lobby.'
+          : 'Waiting for the host to start the next game.'
+        : 'Preparing the participation award draw.';
+
+    this.addText(640, 613, instruction, {
       fontFamily: 'Arial',
-      fontSize: '19px',
+      fontSize: '18px',
       color: '#d8f6ff',
       fontStyle: 'bold'
     }).setOrigin(0.5);
+  }
+
+  private getAwardParticipants(): PlayerSnapshot[] {
+    if (!this.state) return [];
+    return this.state.players.filter((p) => !p.isBot && !p.spectator);
+  }
+
+  private ensureAwardAnimation(): void {
+    if (this.awardStarted || !this.state || this.state.phase !== 'finished') return;
+
+    const participants = this.getAwardParticipants();
+    const winnerId = this.state.participationAwardWinnerId;
+    const winnerIndex = participants.findIndex((p) => p.id === winnerId);
+
+    if (participants.length === 0 || !winnerId || winnerIndex < 0) {
+      this.awardStarted = true;
+      this.awardAnimating = false;
+      this.awardComplete = true;
+      this.renderResults();
+      return;
+    }
+
+    this.awardStarted = true;
+    this.awardAnimating = true;
+    this.awardComplete = false;
+    this.createAwardOverlay();
+
+    const totalSteps = this.pickAwardStepCount(participants.length, winnerIndex);
+    const rawDelays = Array.from({ length: totalSteps }, (_, i) => 35 + Math.pow(i / Math.max(1, totalSteps - 1), 2.2) * 230);
+    const totalRaw = rawDelays.reduce((sum, delay) => sum + delay, 0);
+    const scale = 3900 / totalRaw;
+    let elapsed = 0;
+
+    for (let step = 0; step < totalSteps; step++) {
+      elapsed += rawDelays[step] * scale;
+      const index = this.awardIndexForStep(step, participants.length);
+      const finalStep = step === totalSteps - 1;
+      const timer = this.time.delayedCall(elapsed, () => {
+        this.updateAwardHighlight(participants[index], finalStep);
+      });
+      this.awardTimers.push(timer);
+    }
+  }
+
+  private createAwardOverlay(): void {
+    const panel = this.add.rectangle(640, 452, 650, 166, 0x061a2b, 0.9)
+      .setStrokeStyle(5, 0x9de9ff, 0.95)
+      .setDepth(100);
+    this.awardObjects.push(panel);
+
+    const title = this.add.text(640, 386, 'Participation Award Draw', {
+      fontFamily: 'Arial Black, Arial',
+      fontSize: '25px',
+      color: '#ffffff',
+      stroke: '#07314d',
+      strokeThickness: 5
+    }).setOrigin(0.5).setDepth(101);
+    this.awardObjects.push(title);
+
+    this.awardHighlightRect = this.add.rectangle(640, 452, 500, 54, 0xfff4a3, 1)
+      .setStrokeStyle(4, 0xffffff, 0.9)
+      .setDepth(101);
+    this.awardObjects.push(this.awardHighlightRect);
+
+    this.awardNameText = this.add.text(640, 452, '', {
+      fontFamily: 'Arial Black, Arial',
+      fontSize: '28px',
+      color: '#07314d'
+    }).setOrigin(0.5).setDepth(102);
+    this.awardObjects.push(this.awardNameText);
+
+    this.awardSubText = this.add.text(640, 510, 'Spinning through all real players...', {
+      fontFamily: 'Arial',
+      fontSize: '17px',
+      color: '#d8f6ff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(102);
+    this.awardObjects.push(this.awardSubText);
+  }
+
+  private updateAwardHighlight(player: PlayerSnapshot, finalStep: boolean): void {
+    if (!this.awardNameText || !this.awardHighlightRect || !this.awardSubText) return;
+    this.awardNameText.setText(player.name);
+    this.awardHighlightRect.setFillStyle(Number.parseInt(player.color.replace('#', '0x')), 1);
+    this.awardNameText.setColor('#ffffff');
+    this.awardNameText.setStroke('#07314d', 5);
+
+    if (finalStep) {
+      const winnerName = this.state?.participationAwardWinnerName ?? player.name;
+      this.awardNameText.setText(`🎉 ${winnerName} 🎉`);
+      this.awardSubText.setText('Participation Award Winner!');
+      this.awardAnimating = false;
+      this.awardComplete = true;
+      this.spawnConfetti();
+      this.renderResults();
+    }
+  }
+
+  private pickAwardStepCount(count: number, winnerIndex: number): number {
+    for (let steps = 34; steps <= 58; steps++) {
+      if (this.awardIndexForStep(steps - 1, count) === winnerIndex) return steps;
+    }
+    return Math.max(1, winnerIndex + 1);
+  }
+
+  private awardIndexForStep(step: number, count: number): number {
+    if (count <= 1) return 0;
+    const period = count * 2 - 2;
+    const value = step % period;
+    return value < count ? value : period - value;
+  }
+
+  private spawnConfetti(): void {
+    const colors = [0xfff4a3, 0x9de9ff, 0xf97316, 0x22c55e, 0xec4899, 0x8b5cf6, 0xffffff];
+    for (let i = 0; i < 80; i++) {
+      const confetti = this.add.rectangle(
+        320 + Math.random() * 640,
+        300 + Math.random() * 80,
+        5 + Math.random() * 7,
+        8 + Math.random() * 10,
+        colors[Math.floor(Math.random() * colors.length)],
+        1,
+      ).setDepth(150).setAngle(Math.random() * 360);
+      this.awardObjects.push(confetti);
+      this.tweens.add({
+        targets: confetti,
+        y: 620 + Math.random() * 60,
+        x: confetti.x + (Math.random() - 0.5) * 260,
+        angle: confetti.angle + 180 + Math.random() * 360,
+        alpha: 0,
+        duration: 1700 + Math.random() * 900,
+        ease: 'Sine.easeOut'
+      });
+    }
   }
 }

@@ -138,3 +138,7 @@ export function sendReturnLobby(): void {
 export function sendAim(angle: number, power: number): void {
   room?.send('aim', { angle, power });
 }
+
+export function sendCheer(targetId: string): void {
+  room?.send('cheer', { targetId });
+}

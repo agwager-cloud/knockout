@@ -156,3 +156,27 @@ canvas {
   margin-top: 4px;
   font-size: 12px;
 }
+
+.knockout-panel button:disabled,
+.knockout-panel input:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+.knockout-panel button:disabled:active {
+  transform: none;
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.22);
+}
+
+.knockout-panel .loading {
+  min-height: 18px;
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 900;
+  color: #0b5c86;
+}
+
+.knockout-panel.start-panel.is-loading {
+  border-color: rgba(255, 217, 100, 0.96);
+  box-shadow: 0 0 0 4px rgba(255, 217, 100, 0.18), 0 14px 46px rgba(0, 0, 0, 0.34);
+}

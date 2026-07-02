@@ -14,6 +14,7 @@ export interface PlayerSnapshot {
   eliminatedRound: number | null;
   isBot: boolean;
   spectator: boolean;
+  cheerCount: number;
 }
 
 export interface EliminationEntry {
@@ -37,6 +38,9 @@ export interface GameSnapshot {
   championId: string | null;
   championName: string | null;
   botsEnabled: boolean;
+  totalCheers: number;
+  participationAwardWinnerId: string | null;
+  participationAwardWinnerName: string | null;
   countdownMs: number;
   round: number;
   table: {
