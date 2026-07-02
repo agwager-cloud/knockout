@@ -1,9 +1,9 @@
 import { Client, Room } from '@colyseus/sdk';
 import type { GameSnapshot } from '../shared';
 
-// Later, when deploying to Render, replace this with your real Render URL.
+// Render server URL for the published Knockout server.
 // For local testing, the code below automatically uses localhost or your LAN IP.
-const RENDER_SERVER_URL = 'https://knockout-server.onrender.com';
+const RENDER_SERVER_URL = 'https://knockout-zvwb.onrender.com';
 
 function normaliseHttpUrl(url: string): string {
   return url.replace(/\/$/, '').replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
