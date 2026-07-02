@@ -1,18 +1,13 @@
-# Knockout Hot Fix 13 — Participation Award Overlay Timing
+# Knockout hot fix 14
 
 ## Changes
 
-- ResultsScene participation award now always performs a suspense draw for roughly 4 seconds before revealing the winner.
-- Single-human-player games now still show an animated draw sequence instead of instantly revealing the award winner.
-- After the winner is revealed, the award pop-up and confetti stay visible for 3 seconds.
-- The award overlay then hides automatically so the elimination order and cheer stats underneath are visible.
-- Host controls remain locked while the draw is running and while the winner pop-up is visible.
-- PLAY AGAIN and RETURN TO LOBBY unlock after the pop-up closes.
-
-## Files changed
-
-- client/src/scenes/ResultsScene.ts
+- Moved the eliminated-player cheer overlay lower so it sits more neatly between the pool table and the bottom instruction text.
+- Added a clear label above the cheer icons: `Tap a penguin to cheer!`
+- Updated the eliminated-player instruction after round 5 to: `Click or tap a penguin below to cheer for your favourite player!`
+- Keeps the original eliminated-player message before cheering unlocks.
 
 ## Testing
 
-- `npm run build` passes for both client and server.
+- `npm run build` passes for the client and server.
+- The updated itch.io client build keeps the existing Render server URL and itch-safe asset/audio paths.

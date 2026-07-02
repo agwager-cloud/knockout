@@ -47,6 +47,7 @@ export class GameScene extends Phaser.Scene {
   private totalCheersText!: Phaser.GameObjects.Text;
   private helpText!: Phaser.GameObjects.Text;
   private powerText?: Phaser.GameObjects.Text;
+  private cheerLabelText?: Phaser.GameObjects.Text;
   private cheerButtons: Array<{ id: string; x: number; y: number; radius: number }> = [];
   private aimAngle = 0;
   private aimPower = 0;
@@ -74,6 +75,7 @@ export class GameScene extends Phaser.Scene {
     // never tries to update text objects that were destroyed when the scene shut down.
     this.labels.clear();
     this.powerText = undefined;
+    this.cheerLabelText = undefined;
     this.unsubscribe = undefined;
     this.dragging = false;
     this.aimVisible = false;
@@ -168,6 +170,7 @@ export class GameScene extends Phaser.Scene {
       this.input.off('pointerupoutside', this.handlePointerUp, this);
       this.labels.clear();
       this.powerText = undefined;
+      this.cheerLabelText = undefined;
       this.dragging = false;
       this.aimVisible = false;
       this.seenEliminationIds.clear();
@@ -523,7 +526,11 @@ export class GameScene extends Phaser.Scene {
       if (me?.spectator) {
         this.helpText.setText('You are spectating this match and will join the next game.');
       } else if (amEliminatedParticipant) {
-        this.helpText.setText('Stick around until the end and cheer for your favourite player.');
+        this.helpText.setText(
+          this.state.round > 5
+            ? 'Click or tap a penguin below to cheer for your favourite player!'
+            : 'Stick around until the end and cheer for your favourite player.'
+        );
       } else {
         this.helpText.setText(
           holes > 0
@@ -539,7 +546,9 @@ export class GameScene extends Phaser.Scene {
         me?.spectator
           ? 'You are spectating this match and will join the next game.'
           : amEliminatedParticipant
-            ? 'Stick around until the end and cheer for your favourite player.'
+            ? this.state.round > 5
+              ? 'Click or tap a penguin below to cheer for your favourite player!'
+              : 'Stick around until the end and cheer for your favourite player.'
           : holes > 0
             ? `Penguins are sliding. Extra ice holes are active from round 11 onwards.`
             : 'Penguins are sliding. Next 10 second shot starts when everything stops.'
@@ -572,21 +581,40 @@ export class GameScene extends Phaser.Scene {
 
   private drawCheerIcons(g: Phaser.GameObjects.Graphics, me?: PlayerSnapshot): void {
     this.cheerButtons = [];
-    if (!this.state || !me || me.alive || me.spectator || this.state.round <= 5) return;
-    if (this.state.phase !== 'aiming' && this.state.phase !== 'rolling') return;
+    const shouldShow =
+      !!this.state &&
+      !!me &&
+      !me.alive &&
+      !me.spectator &&
+      this.state.round > 5 &&
+      (this.state.phase === 'aiming' || this.state.phase === 'rolling');
+
+    if (!shouldShow || !this.state) {
+      this.setCheerLabel('', 0, 0, false);
+      return;
+    }
 
     const targets = this.state.players.filter((p) => p.alive && !p.spectator && p.connected);
-    if (targets.length === 0) return;
+    if (targets.length === 0) {
+      this.setCheerLabel('', 0, 0, false);
+      return;
+    }
 
     const rows = targets.length > 22 ? 2 : 1;
     const perRow = Math.ceil(targets.length / rows);
-    const spacing = perRow <= 1 ? 0 : Math.min(46, (TABLE_W - 140) / (perRow - 1));
-    const startY = rows === 1 ? TABLE_Y + TABLE_H + 34 : TABLE_Y + TABLE_H + 23;
+    const spacing = perRow <= 1 ? 0 : Math.min(46, (TABLE_W - 160) / (perRow - 1));
+    const boxX = TABLE_X + 92;
+    const boxW = TABLE_W - 184;
+    const boxH = rows === 1 ? 70 : 102;
+    const boxY = rows === 1 ? TABLE_Y + TABLE_H + 44 : TABLE_Y + TABLE_H + 28;
+    const startY = boxY + 45;
 
-    g.fillStyle(0x061a2b, 0.58);
-    g.fillRoundedRect(TABLE_X + 84, startY - 25, TABLE_W - 168, rows === 1 ? 54 : 86, 18);
-    g.lineStyle(2, 0x9de9ff, 0.38);
-    g.strokeRoundedRect(TABLE_X + 84, startY - 25, TABLE_W - 168, rows === 1 ? 54 : 86, 18);
+    g.fillStyle(0x061a2b, 0.66);
+    g.fillRoundedRect(boxX, boxY, boxW, boxH, 18);
+    g.lineStyle(2, 0x9de9ff, 0.48);
+    g.strokeRoundedRect(boxX, boxY, boxW, boxH, 18);
+
+    this.setCheerLabel('Tap a penguin to cheer!', 640, boxY + 15, true);
 
     targets.forEach((player, index) => {
       const row = Math.floor(index / perRow);
@@ -615,6 +643,25 @@ export class GameScene extends Phaser.Scene {
     g.fillCircle(x + 4, y - 4, 1.8);
     g.fillStyle(0xffb031, 1);
     g.fillTriangle(x - 3, y, x + 3, y, x, y + 4);
+  }
+
+  private setCheerLabel(text: string, x: number, y: number, visible: boolean): void {
+    if (!this.cheerLabelText) {
+      this.cheerLabelText = this.add
+        .text(0, 0, '', {
+          fontFamily: 'Arial Black, Arial',
+          fontSize: '14px',
+          color: '#e9fbff',
+          stroke: '#07314d',
+          strokeThickness: 3,
+          align: 'center'
+        })
+        .setOrigin(0.5)
+        .setDepth(30);
+    }
+    this.cheerLabelText.setText(text);
+    this.cheerLabelText.setPosition(x, y);
+    this.cheerLabelText.setVisible(visible);
   }
 
   private addOrUpdatePowerText(text: string, x: number, y: number): void {
