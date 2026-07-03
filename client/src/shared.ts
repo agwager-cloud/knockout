@@ -1,4 +1,5 @@
 export type GamePhase = "lobby" | "aiming" | "rolling" | "finished";
+export type BotMode = "off" | "eight" | "fill";
 
 export interface PlayerSnapshot {
   id: string;
@@ -38,6 +39,7 @@ export interface GameSnapshot {
   championId: string | null;
   championName: string | null;
   botsEnabled: boolean;
+  botMode?: BotMode;
   totalCheers: number;
   participationAwardWinnerId: string | null;
   participationAwardWinnerName: string | null;

@@ -7,6 +7,7 @@ import type {
   GameSnapshot,
   PlayerSnapshot,
   PocketSnapshot,
+  BotMode,
 } from "./types.js";
 
 const MAX_PLAYERS = 40;
@@ -156,12 +157,14 @@ export class KnockoutRoom extends Room {
   private rollingStartedAt = 0;
   private message = "Waiting for host to start.";
   private botCounter = 0;
-  private botsEnabled = false;
+  private botMode: BotMode = "off";
   private deviceIds = new Map<string, string>();
   private cheerThrottle = new Map<string, number>();
 
   onAuth(client: Client, options: { deviceId?: unknown }): boolean {
     const deviceId = cleanDeviceId(options.deviceId);
+    this.removeStaleDisconnectedPlayersForDevice(deviceId);
+
     const duplicate = Array.from(this.players.values()).find(
       (p) =>
         p.connected &&
@@ -173,6 +176,13 @@ export class KnockoutRoom extends Room {
       throw new Error(
         "This device is already connected to this room. Use the existing tab or device.",
       );
+    }
+
+    if (this.players.size >= MAX_PLAYERS) {
+      const removedBot = this.removeOneBotForHumanJoin();
+      if (!removedBot) {
+        throw new Error("Game is at capacity. Try again later.");
+      }
     }
 
     return true;
@@ -199,18 +209,18 @@ export class KnockoutRoom extends Room {
       this.returnToLobby();
     });
 
+    this.onMessage("setBotMode", (client, data: { mode?: unknown }) => {
+      if (!this.isHost(client.sessionId)) return;
+      if (this.phase !== "lobby") return;
+      const mode = data.mode === "fill" || data.mode === "eight" ? data.mode : "off";
+      this.setBotMode(mode);
+    });
+
+    // Backwards-compatible handler for older clients.
     this.onMessage("toggleBots", (client, data: { enabled?: unknown }) => {
       if (!this.isHost(client.sessionId)) return;
       if (this.phase !== "lobby") return;
-      this.botsEnabled = data.enabled === true;
-      if (this.botsEnabled) {
-        this.ensureTestBots();
-        this.message = "8 test bots are ready for local testing.";
-      } else {
-        this.removeTestBots();
-        this.message = "Test bots removed. Only real players will join the match.";
-      }
-      this.broadcastSnapshot();
+      this.setBotMode(data.enabled === true ? "eight" : "off");
     });
 
     this.onMessage("kickPlayer", (client, data: { playerId?: unknown }) => {
@@ -244,11 +254,27 @@ export class KnockoutRoom extends Room {
   }
 
   onJoin(client: Client, options: { name?: string; deviceId?: unknown }): void {
+    const deviceId = cleanDeviceId(options.deviceId);
+    const playerName = cleanName(options.name);
+
+    // If a player loses connection and rejoins from the same device, remove the
+    // stale disconnected snapshot before creating the new session. This prevents
+    // duplicate names/colours appearing in the results and award draw.
+    this.removeStaleDisconnectedPlayersForDevice(deviceId, playerName);
+
+    if (this.players.size >= MAX_PLAYERS) {
+      const removedBot = this.removeOneBotForHumanJoin();
+      if (!removedBot) {
+        client.leave(4002);
+        return;
+      }
+    }
+
     const firstHumanPlayer = this.getConnectedHumans().length === 0;
     const joinedDuringActiveGame = this.phase !== "lobby";
     const player: PlayerSnapshot = {
       id: client.sessionId,
-      name: cleanName(options.name),
+      name: playerName,
       color: COLORS[this.players.size % COLORS.length],
       x: TABLE_W / 2,
       y: TABLE_H / 2,
@@ -264,7 +290,8 @@ export class KnockoutRoom extends Room {
     };
 
     this.players.set(client.sessionId, player);
-    this.deviceIds.set(client.sessionId, cleanDeviceId(options.deviceId));
+    this.deviceIds.set(client.sessionId, deviceId);
+    if (this.phase === "lobby") this.syncBotsForMode();
     this.ensureHost();
 
     this.message = joinedDuringActiveGame
@@ -333,8 +360,8 @@ export class KnockoutRoom extends Room {
   }
 
   private startGame(): void {
-    if (this.botsEnabled) this.ensureTestBots();
-    else this.removeTestBots();
+    this.removeDisconnectedHumans();
+    this.syncBotsForMode();
     this.phase = "rolling";
     this.round = 0;
     this.eliminationOrder = [];
@@ -390,8 +417,7 @@ export class KnockoutRoom extends Room {
       p.vy = 0;
     }
 
-    if (this.botsEnabled) this.ensureTestBots();
-    else this.removeTestBots();
+    this.syncBotsForMode();
     this.ensureHost();
     this.broadcastSnapshot();
   }
@@ -636,36 +662,120 @@ export class KnockoutRoom extends Room {
     }
   }
 
-  private ensureTestBots(): void {
-    const existingBots = Array.from(this.players.values()).filter(
-      (p) => p.isBot,
-    );
-    const botSlotsAvailable = Math.max(0, MAX_PLAYERS - this.players.size);
-    const needed = Math.min(
-      TEST_BOT_COUNT - existingBots.length,
-      botSlotsAvailable,
+  private setBotMode(mode: BotMode): void {
+    this.botMode = mode;
+    this.syncBotsForMode();
+    const botCount = this.getBots().length;
+    this.message =
+      mode === "off"
+        ? "Bots removed. Only real players will join the match."
+        : mode === "eight"
+          ? `${botCount} test bots are ready.`
+          : `Fill mode is on. Bots will fill empty spots up to 40 players.`;
+    this.broadcastSnapshot();
+  }
+
+  private syncBotsForMode(): void {
+    const target = this.getDesiredBotCount();
+    const bots = this.getBots();
+
+    while (bots.length > target) {
+      const bot = bots.pop();
+      if (!bot) break;
+      this.players.delete(bot.id);
+      this.aimCommands.delete(bot.id);
+      this.cheerThrottle.delete(bot.id);
+    }
+
+    while (this.getBots().length < target && this.players.size < MAX_PLAYERS) {
+      this.addBot();
+    }
+  }
+
+  private getDesiredBotCount(): number {
+    if (this.botMode === "off") return 0;
+    const humanCount = Array.from(this.players.values()).filter(
+      (p) => !p.isBot && p.connected,
+    ).length;
+    const availableForBots = Math.max(0, MAX_PLAYERS - humanCount);
+    if (this.botMode === "fill") return availableForBots;
+    return Math.min(TEST_BOT_COUNT, availableForBots);
+  }
+
+  private getBots(): PlayerSnapshot[] {
+    return Array.from(this.players.values()).filter((p) => p.isBot);
+  }
+
+  private addBot(): void {
+    const botNumber = ++this.botCounter;
+    const baseName = BOT_NAMES[(botNumber - 1) % BOT_NAMES.length];
+    const cycle = Math.floor((botNumber - 1) / BOT_NAMES.length) + 1;
+    const id = `bot-${botNumber}`;
+    const bot: PlayerSnapshot = {
+      id,
+      name: cycle === 1 ? baseName : `${baseName}${cycle}`,
+      color: COLORS[this.players.size % COLORS.length],
+      x: TABLE_W / 2,
+      y: TABLE_H / 2,
+      vx: 0,
+      vy: 0,
+      alive: this.phase === "lobby",
+      host: false,
+      connected: true,
+      eliminatedRound: null,
+      isBot: true,
+      spectator: false,
+      cheerCount: 0,
+    };
+    this.players.set(id, bot);
+  }
+
+  private removeOneBotForHumanJoin(): boolean {
+    const bot = this.getBots()[0];
+    if (!bot) return false;
+    this.players.delete(bot.id);
+    this.aimCommands.delete(bot.id);
+    this.cheerThrottle.delete(bot.id);
+    return true;
+  }
+
+  private removeDisconnectedHumans(): void {
+    for (const player of Array.from(this.players.values())) {
+      if (!player.isBot && !player.connected) {
+        this.removePlayerCompletely(player.id);
+      }
+    }
+  }
+
+  private removeStaleDisconnectedPlayersForDevice(deviceId: string, fallbackName?: string): void {
+    const staleByDevice = Array.from(this.players.values()).filter(
+      (p) => !p.isBot && !p.connected && this.deviceIds.get(p.id) === deviceId,
     );
 
-    for (let i = 0; i < needed; i++) {
-      const botIndex = existingBots.length + i;
-      const id = `bot-${++this.botCounter}`;
-      const bot: PlayerSnapshot = {
-        id,
-        name: BOT_NAMES[botIndex % BOT_NAMES.length],
-        color: COLORS[this.players.size % COLORS.length],
-        x: TABLE_W / 2,
-        y: TABLE_H / 2,
-        vx: 0,
-        vy: 0,
-        alive: this.phase === "lobby",
-        host: false,
-        connected: true,
-        eliminatedRound: null,
-        isBot: true,
-        spectator: false,
-        cheerCount: 0,
-      };
-      this.players.set(id, bot);
+    const staleByName =
+      staleByDevice.length === 0 && fallbackName
+        ? Array.from(this.players.values()).filter(
+            (p) => !p.isBot && !p.connected && p.name === fallbackName,
+          )
+        : [];
+
+    const stalePlayers = staleByDevice.length > 0 ? staleByDevice : staleByName.length === 1 ? staleByName : [];
+    for (const stale of stalePlayers) this.removePlayerCompletely(stale.id);
+  }
+
+  private removePlayerCompletely(playerId: string): void {
+    this.players.delete(playerId);
+    this.deviceIds.delete(playerId);
+    this.aimCommands.delete(playerId);
+    this.cheerThrottle.delete(playerId);
+    this.eliminationOrder = this.eliminationOrder.filter((entry) => entry.id !== playerId);
+    if (this.championId === playerId) {
+      this.championId = null;
+      this.championName = null;
+    }
+    if (this.participationAwardWinnerId === playerId) {
+      this.participationAwardWinnerId = null;
+      this.participationAwardWinnerName = null;
     }
   }
 
@@ -688,9 +798,7 @@ export class KnockoutRoom extends Room {
   private removeTestBots(): void {
     for (const [id, player] of Array.from(this.players.entries())) {
       if (!player.isBot) continue;
-      this.players.delete(id);
-      this.aimCommands.delete(id);
-      this.deviceIds.delete(id);
+      this.removePlayerCompletely(id);
     }
   }
 
@@ -855,7 +963,8 @@ export class KnockoutRoom extends Room {
       extraPockets: this.extraPockets,
       championId: this.championId,
       championName: this.championName,
-      botsEnabled: this.botsEnabled,
+      botsEnabled: this.botMode !== "off",
+      botMode: this.botMode,
       totalCheers,
       participationAwardWinnerId: this.participationAwardWinnerId,
       participationAwardWinnerName: this.participationAwardWinnerName,

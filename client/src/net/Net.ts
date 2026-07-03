@@ -1,5 +1,5 @@
 import { Client, Room } from '@colyseus/sdk';
-import type { GameSnapshot } from '../shared';
+import type { BotMode, GameSnapshot } from '../shared';
 
 // Render server URL for the published Knockout server.
 // For local testing, the code below automatically uses localhost or your LAN IP.
@@ -121,6 +121,10 @@ export function sendStartGame(): void {
 
 export function sendToggleBots(enabled: boolean): void {
   room?.send('toggleBots', { enabled });
+}
+
+export function sendSetBotMode(mode: BotMode): void {
+  room?.send('setBotMode', { mode });
 }
 
 export function sendKickPlayer(playerId: string): void {

@@ -267,8 +267,19 @@ export class ResultsScene extends Phaser.Scene {
       color: "#07314d",
     }).setOrigin(0.5);
 
+    const currentConnectedNames = new Map(
+      this.state.players
+        .filter((p) => p.connected && !p.isBot)
+        .map((p) => [p.name.toLowerCase(), p.id]),
+    );
     const entries = [...this.state.eliminationOrder]
       .filter((entry) => entry.id !== this.state?.championId)
+      .filter((entry) => {
+        const player = this.state?.players.find((p) => p.id === entry.id);
+        if (player && player.connected === false) return false;
+        const currentId = currentConnectedNames.get(entry.name.toLowerCase());
+        return !currentId || currentId === entry.id;
+      })
       .reverse();
     if (entries.length === 0) {
       this.addText(190, 300, "No penguins were eliminated.", {
@@ -358,7 +369,14 @@ export class ResultsScene extends Phaser.Scene {
 
   private getAwardParticipants(): PlayerSnapshot[] {
     if (!this.state) return [];
-    return this.state.players.filter((p) => !p.isBot && !p.spectator);
+    const seenNames = new Set<string>();
+    return this.state.players.filter((p) => {
+      if (!p.connected || p.isBot || p.spectator) return false;
+      const key = p.name.toLowerCase();
+      if (seenNames.has(key)) return false;
+      seenNames.add(key);
+      return true;
+    });
   }
 
   private ensureAwardAnimation(): void {

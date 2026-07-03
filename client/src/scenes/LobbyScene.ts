@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { addSoundToggle, ensureBackgroundMusic, preloadBackgroundMusic } from '../audio/AudioManager';
-import { getMyId, sendKickPlayer, sendStartGame, sendToggleBots, watchState } from '../net/Net';
-import type { GameSnapshot, PlayerSnapshot } from '../shared';
+import { getMyId, sendKickPlayer, sendSetBotMode, sendStartGame, watchState } from '../net/Net';
+import type { BotMode, GameSnapshot, PlayerSnapshot } from '../shared';
 
 export class LobbyScene extends Phaser.Scene {
   private unsubscribe?: () => void;
@@ -92,7 +92,7 @@ export class LobbyScene extends Phaser.Scene {
 
     this.botButton.on('pointerdown', () => {
       if (!this.isHost() || !this.state) return;
-      sendToggleBots(!this.state.botsEnabled);
+      sendSetBotMode(this.nextBotMode(this.getBotMode()));
     });
 
     this.unsubscribe = watchState((state) => {
@@ -174,9 +174,18 @@ export class LobbyScene extends Phaser.Scene {
     this.startButton.setText(host ? 'START GAME' : 'WAITING FOR HOST');
 
     const botCount = this.state.players.filter((p) => p.isBot).length;
+    const botMode = this.getBotMode();
     this.botButton.setVisible(host);
-    this.botButton.setText(this.state.botsEnabled ? `BOTS: ON (${botCount})` : 'BOTS: OFF');
-    this.botButton.setBackgroundColor(this.state.botsEnabled ? '#16a34a' : '#ef8d23');
+    this.botButton.setText(
+      botMode === 'off'
+        ? 'BOTS: OFF'
+        : botMode === 'eight'
+          ? `8 BOTS (${botCount})`
+          : `FILL 40 (${botCount})`
+    );
+    this.botButton.setBackgroundColor(
+      botMode === 'off' ? '#ef8d23' : botMode === 'eight' ? '#16a34a' : '#7c3aed'
+    );
 
     this.manageButton.setVisible(host);
     this.manageButton.setText(this.manageOpen ? 'CLOSE MANAGE' : 'MANAGE PLAYERS');
@@ -202,13 +211,26 @@ export class LobbyScene extends Phaser.Scene {
         wordWrap: { width: 1000 }
       }).setOrigin(0.5);
     }
+    const botMode = this.getBotMode();
     this.helpText.setText(
       host
-        ? botCount > 0
-          ? `Start when ready. ${botCount} bots are included.`
-          : 'Start when ready, or turn bots on for local testing.'
+        ? botMode === 'fill'
+          ? `Fill mode is on. Bots fill empty spots up to 40 and leave when real players join.`
+          : botCount > 0
+            ? `Start when ready. ${botCount} bots are included.`
+            : 'Start when ready, or use the bot button for 8 bots or fill-to-40 testing.'
         : 'Your penguin is ready. The host will start the match.'
     );
+  }
+
+  private getBotMode(): BotMode {
+    return this.state?.botMode ?? (this.state?.botsEnabled ? 'eight' : 'off');
+  }
+
+  private nextBotMode(mode: BotMode): BotMode {
+    if (mode === 'off') return 'eight';
+    if (mode === 'eight') return 'fill';
+    return 'off';
   }
 
   private clearManagePanel(): void {
