@@ -10,24 +10,33 @@ const port = Number(process.env.PORT || 2567);
 const gameServer = new Server({
   transport: new WebSocketTransport(),
   express: (app) => {
+    app.disable('x-powered-by');
     app.use(cors());
     app.use(express.json());
 
-    app.get('/', (_req, res) => {
-      res.send('Knockout server is running.');
-    });
+    const sendStatus = (_req: express.Request, res: express.Response): void => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.json({
+        ok: true,
+        game: 'Knockout',
+        status: 'ready',
+        serverTime: Date.now()
+      });
+    };
 
-    app.get('/health', (_req, res) => {
-      res.json({ ok: true, game: 'Knockout' });
-    });
+    // Classroom clients use neutral GET endpoints to wake a sleeping Render
+    // service. /health remains available for Render monitoring and older builds.
+    app.get('/', sendStatus);
+    app.get('/api/status', sendStatus);
+    app.get('/health', sendStatus);
 
     app.get('/room-by-code/:code', (req, res) => {
       const roomId = getRoomIdByCode(req.params.code);
       if (!roomId) {
-        res.status(404).json({ error: 'Room code not found' });
+        res.status(404).json({ ok: false, error: 'Room code not found' });
         return;
       }
-      res.json({ roomId });
+      res.json({ ok: true, roomId });
     });
   }
 });

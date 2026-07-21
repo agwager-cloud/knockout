@@ -1,9 +1,14 @@
 import Phaser from 'phaser';
 import { addSoundToggle, ensureBackgroundMusic, preloadBackgroundMusic } from '../audio/AudioManager';
-import { hostGame, joinGame, HTTP_SERVER_URL } from '../net/Net';
+import {
+  hostGame,
+  joinGame,
+  type ConnectionProgress
+} from '../net/Net';
 
 export class StartScene extends Phaser.Scene {
   private panel?: Phaser.GameObjects.DOMElement;
+  private connectionTimer: number | null = null;
 
   constructor() {
     super('StartScene');
@@ -22,6 +27,10 @@ export class StartScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    if (this.connectionTimer !== null) {
+      window.clearInterval(this.connectionTimer);
+      this.connectionTimer = null;
+    }
     this.panel?.destroy();
   }
 
@@ -31,82 +40,124 @@ export class StartScene extends Phaser.Scene {
     // Small soft shadow behind the form so it remains readable without covering the artwork.
     const g = this.add.graphics();
     g.fillStyle(0x001827, 0.28);
-    g.fillRoundedRect(430, 292, 420, 252, 30);
-  }
-
-  private async waitForServer(statusText: HTMLDivElement): Promise<void> {
-    // Render free services can sleep. A lightweight health check wakes the server before
-    // opening the Colyseus websocket, and the status message stops students spamming buttons.
-    const deadline = Date.now() + 75_000;
-    let attempt = 1;
-
-    while (Date.now() < deadline) {
-      const secondsWaited = Math.max(0, Math.round((Date.now() - (deadline - 75_000)) / 1000));
-      statusText.textContent = secondsWaited < 4
-        ? 'Creating classroom...'
-        : `Creating classroom... waking the free server (${secondsWaited}s)`;
-
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 8_000);
-
-      try {
-        const response = await fetch(`${HTTP_SERVER_URL}/health`, {
-          cache: 'no-store',
-          signal: controller.signal
-        });
-        if (response.ok) {
-          statusText.textContent = attempt > 1 ? 'Server is awake. Creating classroom...' : 'Creating classroom...';
-          return;
-        }
-      } catch {
-        // The server may still be waking. Try again until the deadline.
-      } finally {
-        window.clearTimeout(timeout);
-      }
-
-      attempt += 1;
-      await new Promise((resolve) => window.setTimeout(resolve, 1800));
-    }
-
-    throw new Error('The free server is still waking up. Please wait a moment and try again.');
+    g.fillRoundedRect(430, 292, 420, 272, 30);
   }
 
   private createForm(): void {
     const html = `
       <div class="knockout-panel start-panel">
-        <div class="form-title">Choose your penguin name</div>
-        <input id="playerName" maxlength="12" autocomplete="off" placeholder="Your name" />
-        <button class="host" id="hostButton">Host Game</button>
-        <input id="roomCode" maxlength="5" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="5 digit code" />
-        <button class="join" id="joinButton">Join Game</button>
-        <div class="loading" id="loadingText"></div>
-        <div class="error" id="errorText"></div>
+        <div class="start-fields" id="startFields">
+          <div class="form-title">Choose your penguin name</div>
+          <input id="playerName" maxlength="12" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" placeholder="Your name" />
+          <button class="host" id="hostButton" type="button">Host Game</button>
+          <input id="roomCode" maxlength="5" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="5 digit code" />
+          <button class="join" id="joinButton" type="button">Join Game</button>
+        </div>
+
+        <div class="connection-panel" id="connectionPanel" hidden aria-live="polite">
+          <div class="connection-title" id="connectionTitle">Connecting to Knockout</div>
+          <div class="connection-message" id="connectionMessage">Contacting the classroom server...</div>
+          <div class="connection-progress" id="connectionProgress" role="progressbar" aria-label="Server connection progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="4">
+            <div class="connection-progress-fill" id="connectionProgressFill"></div>
+          </div>
+          <div class="connection-elapsed" id="connectionElapsed">Waiting 0 seconds · free servers can take 60–100 seconds</div>
+        </div>
+
+        <div class="error" id="errorText" aria-live="assertive"></div>
       </div>
     `;
 
-    this.panel = this.add.dom(640, 420).createFromHTML(html).setOrigin(0.5);
+    // Anchor from the top edge. Changing the status-card height can no longer
+    // make the whole overlay drop down on phones, iPads or short laptop windows.
+    this.panel = this.add.dom(640, 298).createFromHTML(html).setOrigin(0.5, 0);
 
     const root = this.panel.node as HTMLElement;
+    const startFields = root.querySelector<HTMLDivElement>('#startFields')!;
     const nameInput = root.querySelector<HTMLInputElement>('#playerName')!;
     const roomCodeInput = root.querySelector<HTMLInputElement>('#roomCode')!;
     const hostButton = root.querySelector<HTMLButtonElement>('#hostButton')!;
     const joinButton = root.querySelector<HTMLButtonElement>('#joinButton')!;
-    const loadingText = root.querySelector<HTMLDivElement>('#loadingText')!;
+    const connectionPanel = root.querySelector<HTMLDivElement>('#connectionPanel')!;
+    const connectionTitle = root.querySelector<HTMLDivElement>('#connectionTitle')!;
+    const connectionMessage = root.querySelector<HTMLDivElement>('#connectionMessage')!;
+    const connectionProgress = root.querySelector<HTMLDivElement>('#connectionProgress')!;
+    const connectionProgressFill = root.querySelector<HTMLDivElement>('#connectionProgressFill')!;
+    const connectionElapsed = root.querySelector<HTMLDivElement>('#connectionElapsed')!;
     const errorText = root.querySelector<HTMLDivElement>('#errorText')!;
+
+    let connectionStartedAt = 0;
+    let hasNetworkProgressMessage = false;
 
     roomCodeInput.addEventListener('input', () => {
       roomCodeInput.value = roomCodeInput.value.replace(/\D/g, '').slice(0, 5);
     });
 
-    const setLoading = (loading: boolean, message = ''): void => {
+    const clearConnectionTimer = (): void => {
+      if (this.connectionTimer !== null) {
+        window.clearInterval(this.connectionTimer);
+        this.connectionTimer = null;
+      }
+    };
+
+    const updateProgressDisplay = (elapsedMs?: number, maxMs = 100_000): void => {
+      const elapsed = Math.max(
+        0,
+        elapsedMs ?? (connectionStartedAt > 0 ? Date.now() - connectionStartedAt : 0)
+      );
+      const seconds = Math.floor(elapsed / 1000);
+      const percent = Math.min(96, Math.max(4, Math.round((elapsed / maxMs) * 92 + 4)));
+      connectionProgressFill.style.width = `${percent}%`;
+      connectionProgress.setAttribute('aria-valuenow', String(percent));
+      connectionElapsed.textContent = `Waiting ${seconds} second${seconds === 1 ? '' : 's'} · free servers can take 60–100 seconds`;
+
+      if (!hasNetworkProgressMessage) {
+        if (seconds >= 70) {
+          connectionMessage.textContent = 'Still working. Render can need close to 100 seconds after a long sleep.';
+        } else if (seconds >= 35) {
+          connectionMessage.textContent = 'The server is starting. Keep this page open and do not press the buttons again.';
+        } else if (seconds >= 12) {
+          connectionMessage.textContent = 'Waking the free classroom server. This delay is normal after it has been asleep.';
+        }
+      }
+    };
+
+    const setLoading = (loading: boolean, title = '', message = ''): void => {
       nameInput.disabled = loading;
       roomCodeInput.disabled = loading;
       hostButton.disabled = loading;
       joinButton.disabled = loading;
-      hostButton.textContent = loading ? 'Please wait...' : 'Host Game';
-      joinButton.textContent = loading ? 'Please wait...' : 'Join Game';
-      loadingText.textContent = message;
       root.classList.toggle('is-loading', loading);
+      startFields.hidden = loading;
+      connectionPanel.hidden = !loading;
+
+      if (loading) {
+        nameInput.blur();
+        roomCodeInput.blur();
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+
+        errorText.textContent = '';
+        connectionTitle.textContent = title || 'Connecting to Knockout';
+        connectionMessage.textContent = message || 'Contacting the classroom server...';
+        hasNetworkProgressMessage = false;
+        connectionStartedAt = Date.now();
+        updateProgressDisplay(0);
+        clearConnectionTimer();
+        this.connectionTimer = window.setInterval(() => updateProgressDisplay(), 500);
+      } else {
+        clearConnectionTimer();
+      }
+    };
+
+    const onProgress = (progress: ConnectionProgress): void => {
+      hasNetworkProgressMessage = true;
+      connectionTitle.textContent =
+        progress.stage === 'syncing'
+          ? 'Loading the Knockout lobby'
+          : progress.stage === 'joining'
+            ? 'Joining the classroom'
+            : 'Connecting to Knockout';
+      connectionMessage.textContent = progress.message;
+      updateProgressDisplay(progress.elapsedMs, progress.maxMs);
     };
 
     const getName = (): string => {
@@ -114,36 +165,47 @@ export class StartScene extends Phaser.Scene {
       return trimmed.length > 0 ? trimmed : 'Penguin';
     };
 
+    const showError = (error: unknown, fallback: string): void => {
+      errorText.textContent = error instanceof Error ? error.message : fallback;
+      root.scrollTop = root.scrollHeight;
+    };
+
     hostButton.addEventListener('click', async () => {
+      if (hostButton.disabled) return;
       try {
-        errorText.textContent = '';
-        setLoading(true, 'Creating classroom...');
-        await this.waitForServer(loadingText);
-        loadingText.textContent = 'Creating classroom...';
-        await hostGame(getName());
-        loadingText.textContent = 'Classroom created!';
+        setLoading(
+          true,
+          'Creating the Knockout classroom',
+          'Contacting the classroom server. Please keep this page open.'
+        );
+        await hostGame(getName(), onProgress);
+        connectionTitle.textContent = 'Classroom ready!';
+        connectionMessage.textContent = 'Opening the Knockout lobby...';
         this.scene.start('LobbyScene');
       } catch (error) {
-        errorText.textContent = error instanceof Error ? error.message : 'Could not create game.';
-      } finally {
-        if (this.scene.isActive('StartScene')) setLoading(false);
+        setLoading(false);
+        showError(error, 'Could not create the Knockout classroom.');
       }
     });
 
     joinButton.addEventListener('click', async () => {
+      if (joinButton.disabled) return;
       try {
         const code = roomCodeInput.value.trim().replace(/\D/g, '');
-        if (!/^\d{5}$/.test(code)) throw new Error('Enter the 5 digit room code.');
-        errorText.textContent = '';
-        setLoading(true, 'Joining classroom...');
-        await this.waitForServer(loadingText);
-        loadingText.textContent = 'Joining classroom...';
-        await joinGame(getName(), code);
+        if (!/^\d{5}$/.test(code)) throw new Error('Enter the 5-digit room code.');
+
+        setLoading(
+          true,
+          'Joining the Knockout classroom',
+          'Contacting the classroom server. Please keep this page open.'
+        );
+        await joinGame(getName(), code, onProgress);
+        connectionTitle.textContent = 'Classroom found!';
+        connectionMessage.textContent = 'Opening the Knockout lobby...';
         this.scene.start('LobbyScene');
       } catch (error) {
-        errorText.textContent = error instanceof Error ? error.message : 'Could not join game.';
-      } finally {
-        if (this.scene.isActive('StartScene')) setLoading(false);
+        setLoading(false);
+        showError(error, 'Could not join the Knockout classroom.');
       }
     });
   }
